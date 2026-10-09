@@ -50,8 +50,11 @@
       - 'name': 'Determine version'
         'id': 'version'
         # The version is the latest release tag reachable from the commit,
-        # e.g. v0.107.79.
+        # e.g. v0.107.79.  Fetch the tags from the upstream repository, since
+        # the fork doesn't receive the new ones automatically.
         'run': |
+          git fetch --quiet https://github.com/AdguardTeam/AdGuardHome.git \
+            '+refs/tags/v*:refs/tags/v*'
           version="$(git describe --tags --abbrev=0 --match 'v*' --exclude '*-*')"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/adguardhome" >> "$GITHUB_OUTPUT"
