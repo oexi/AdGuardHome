@@ -2,6 +2,10 @@
 
 <!-- TODO(a.garipov): Reformat in accordance with the KeepAChangelog spec. -->
 
+## Fork: upstream subscriptions
+
+- New `GET /control/upstream_subscriptions/status` and `POST /control/upstream_subscriptions/{config,add,set,remove,refresh}` HTTP APIs manage subscriptions to remote lists of upstream DNS servers.
+
 ## v0.107.79: API changes
 
 - Field `bootstrap_dns` in `POST /control/dns_config` now accepts comments.  A comment must start with the `#` symbol.

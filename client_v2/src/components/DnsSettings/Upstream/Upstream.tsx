@@ -5,6 +5,10 @@ import cn from 'clsx';
 import intl from 'panel/common/intl';
 import { dnsConfigState, togglePrivatePtrResolvers } from 'panel/stores/dnsConfig';
 import { settingsState, testUpstreamWithFormValues } from 'panel/stores/settings';
+import {
+    toggleUpstreamSubscriptions,
+    upstreamSubscriptionsState,
+} from 'panel/stores/upstreamSubscriptions';
 import { Button } from 'panel/common/ui/Button';
 import { SettingRow } from 'panel/common/ui/SettingRow';
 import { useDialog } from 'panel/hooks/useDialog';
@@ -40,6 +44,15 @@ export const Upstream = () => {
         getUpstreamServersSummary(dnsConfigState.bootstrap_dns),
     );
     const timeoutValue = createMemo(() => getTtlSummary(dnsConfigState.upstream_timeout));
+    const subscriptionsValue = createMemo(() => {
+        const subs = upstreamSubscriptionsState.subscriptions;
+        if (!subs.length) return '';
+        const enabled = subs.filter((sub) => sub.enabled).length;
+        return intl.getMessage('upstream_subscriptions_summary', {
+            enabled,
+            total: subs.length,
+        });
+    });
 
     const processing = () => dnsConfigState.processingSetConfig;
 
@@ -65,6 +78,18 @@ export const Upstream = () => {
                 description={intl.getMessage('dns_server_addresses_desc')}
                 value={serverAddressesValue()}
                 onClick={serverAddressesDialog.openDialog}
+            />
+
+            <SettingRow
+                variant="switch-link"
+                id="upstream_subscriptions"
+                title={intl.getMessage('upstream_subscriptions')}
+                description={intl.getMessage('upstream_subscriptions_row_desc')}
+                value={subscriptionsValue()}
+                checked={upstreamSubscriptionsState.enabled}
+                onChange={() => toggleUpstreamSubscriptions()}
+                onClick={() => navigate(Paths.DnsUpstreamSubscriptions)}
+                divider
             />
 
             <SettingRow

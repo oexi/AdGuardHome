@@ -281,6 +281,10 @@ type ServerConfig struct {
 	// Register an HTTP handler
 	HTTPReg aghhttp.Registrar
 
+	// UpstreamsExtender, if not nil, extends the configured upstreams, e.g.
+	// with the ones from subscriptions.
+	UpstreamsExtender UpstreamsExtender
+
 	// LocalPTRResolvers is a slice of addresses to be used as upstreams for
 	// resolving PTR queries for local addresses.
 	LocalPTRResolvers []string
@@ -308,6 +312,13 @@ type ServerConfig struct {
 	// PendingRequestsEnabled defines if duplicate requests should be forwarded
 	// to upstreams along with the original one.
 	PendingRequestsEnabled bool
+}
+
+// UpstreamsExtender extends the list of upstream configuration lines.
+type UpstreamsExtender interface {
+	// ExtendUpstreams returns ups extended with additional upstream
+	// configuration lines.  It must not modify the elements of ups.
+	ExtendUpstreams(ctx context.Context, ups []string) (extended []string)
 }
 
 // UpstreamMode is a enumeration of upstream mode representations.  See
@@ -522,8 +533,28 @@ func (s *Server) prepareIpsetListSettings(ctx context.Context) (ipsets []string,
 }
 
 // loadUpstreams parses upstream DNS servers from the configured file or from
-// the configuration itself.  l must not be nil.
+// the configuration itself and extends them using the configured extender, if
+// any.  l must not be nil.
 func (conf *ServerConfig) loadUpstreams(
+	ctx context.Context,
+	l *slog.Logger,
+) (upstreams []string, err error) {
+	upstreams, err = conf.loadConfiguredUpstreams(ctx, l)
+	if err != nil {
+		// Don't wrap the error since it's informative enough as is.
+		return nil, err
+	}
+
+	if conf.UpstreamsExtender != nil {
+		upstreams = conf.UpstreamsExtender.ExtendUpstreams(ctx, upstreams)
+	}
+
+	return upstreams, nil
+}
+
+// loadConfiguredUpstreams parses upstream DNS servers from the configured file
+// or from the configuration itself.  l must not be nil.
+func (conf *ServerConfig) loadConfiguredUpstreams(
 	ctx context.Context,
 	l *slog.Logger,
 ) (upstreams []string, err error) {

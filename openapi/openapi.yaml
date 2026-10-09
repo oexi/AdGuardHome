@@ -24,6 +24,8 @@
   'description': 'Built-in DHCP server controls'
 - 'name': 'filtering'
   'description': 'Rule-based filtering'
+- 'name': 'upstream_subscriptions'
+  'description': 'Subscriptions to remote lists of upstream DNS servers'
 - 'name': 'global'
   'description': 'AdGuard Home server general settings and controls'
 - 'name': 'i18n'
@@ -649,6 +651,107 @@
               'schema':
                 '$ref': '#/components/schemas/Error'
           'description': 'Not implemented (for example, on Windows).'
+  '/upstream_subscriptions/status':
+    'get':
+      'tags':
+      - 'upstream_subscriptions'
+      'operationId': 'upstreamSubscriptionsStatus'
+      'summary': 'Get the upstream subscriptions and their state'
+      'responses':
+        '200':
+          'description': 'OK.'
+          'content':
+            'application/json':
+              'schema':
+                '$ref': '#/components/schemas/UpstreamSubscriptionsStatus'
+  '/upstream_subscriptions/config':
+    'post':
+      'tags':
+      - 'upstream_subscriptions'
+      'operationId': 'upstreamSubscriptionsConfig'
+      'summary': 'Set the upstream subscriptions parameters'
+      'requestBody':
+        'content':
+          'application/json':
+            'schema':
+              '$ref': '#/components/schemas/UpstreamSubscriptionsConfig'
+        'required': true
+      'responses':
+        '200':
+          'description': 'OK.'
+  '/upstream_subscriptions/add':
+    'post':
+      'tags':
+      - 'upstream_subscriptions'
+      'operationId': 'upstreamSubscriptionsAdd'
+      'summary': >
+        Add a subscription.  The list is downloaded and validated before
+        adding.
+      'requestBody':
+        'content':
+          'application/json':
+            'schema':
+              '$ref': '#/components/schemas/UpstreamSubscriptionData'
+        'required': true
+      'responses':
+        '200':
+          'description': 'OK.'
+        '400':
+          'description': 'Invalid data or the list could not be downloaded.'
+  '/upstream_subscriptions/set':
+    'post':
+      'tags':
+      - 'upstream_subscriptions'
+      'operationId': 'upstreamSubscriptionsSet'
+      'summary': 'Change a subscription'
+      'requestBody':
+        'content':
+          'application/json':
+            'schema':
+              '$ref': '#/components/schemas/UpstreamSubscriptionSetRequest'
+        'required': true
+      'responses':
+        '200':
+          'description': 'OK.'
+        '400':
+          'description': 'Invalid data or the list could not be downloaded.'
+  '/upstream_subscriptions/remove':
+    'post':
+      'tags':
+      - 'upstream_subscriptions'
+      'operationId': 'upstreamSubscriptionsRemove'
+      'summary': 'Remove a subscription'
+      'requestBody':
+        'content':
+          'application/json':
+            'schema':
+              '$ref': '#/components/schemas/UpstreamSubscriptionIDRequest'
+        'required': true
+      'responses':
+        '200':
+          'description': 'OK.'
+        '400':
+          'description': 'The subscription is not found.'
+  '/upstream_subscriptions/refresh':
+    'post':
+      'tags':
+      - 'upstream_subscriptions'
+      'operationId': 'upstreamSubscriptionsRefresh'
+      'summary': >
+        Update the enabled subscriptions, or only the one with the given id,
+        regardless of the update interval.
+      'requestBody':
+        'content':
+          'application/json':
+            'schema':
+              '$ref': '#/components/schemas/UpstreamSubscriptionIDRequest'
+      'responses':
+        '200':
+          'description': 'OK.'
+          'content':
+            'application/json':
+              'schema':
+                '$ref': '#/components/schemas/UpstreamSubscriptionsRefreshResponse'
   '/filtering/status':
     'get':
       'tags':
@@ -3383,6 +3486,116 @@
       - 'zh-hk'
       - 'zh-tw'
       'type': 'string'
+    'UpstreamSubscription':
+      'type': 'object'
+      'description': 'Subscription to a remote list of upstream DNS servers.'
+      'required':
+      - 'id'
+      - 'name'
+      - 'url'
+      - 'enabled'
+      - 'upstreams'
+      - 'rules_count'
+      - 'invalid_count'
+      'properties':
+        'id':
+          'type': 'integer'
+          'format': 'uint64'
+        'name':
+          'type': 'string'
+        'url':
+          'type': 'string'
+          'example': 'https://example.org/upstreams.txt'
+        'enabled':
+          'type': 'boolean'
+        'upstreams':
+          'type': 'array'
+          'description': >
+            If not empty, the upstreams for all the domains of the list.  Required
+            for plain domain lists.
+          'items':
+            'type': 'string'
+        'rules_count':
+          'type': 'integer'
+        'invalid_count':
+          'type': 'integer'
+          'description': 'Number of the skipped invalid lines.'
+        'last_updated':
+          'type': 'string'
+          'format': 'date-time'
+        'last_error':
+          'type': 'string'
+          'description': 'Error of the last update, if any.'
+    'UpstreamSubscriptionsStatus':
+      'type': 'object'
+      'required':
+      - 'enabled'
+      - 'interval'
+      - 'subscriptions'
+      'properties':
+        'enabled':
+          'type': 'boolean'
+        'interval':
+          'type': 'integer'
+          'description': 'Auto-update interval in hours, 0 means disabled.'
+        'subscriptions':
+          'type': 'array'
+          'items':
+            '$ref': '#/components/schemas/UpstreamSubscription'
+    'UpstreamSubscriptionsConfig':
+      'type': 'object'
+      'properties':
+        'enabled':
+          'type': 'boolean'
+        'interval':
+          'type': 'integer'
+          'minimum': 0
+          'maximum': 8760
+    'UpstreamSubscriptionData':
+      'type': 'object'
+      'required':
+      - 'url'
+      'properties':
+        'name':
+          'type': 'string'
+        'url':
+          'type': 'string'
+        'enabled':
+          'type': 'boolean'
+        'upstreams':
+          'type': 'array'
+          'items':
+            'type': 'string'
+    'UpstreamSubscriptionSetRequest':
+      'type': 'object'
+      'required':
+      - 'id'
+      - 'data'
+      'properties':
+        'id':
+          'type': 'integer'
+          'format': 'uint64'
+        'data':
+          '$ref': '#/components/schemas/UpstreamSubscriptionData'
+    'UpstreamSubscriptionIDRequest':
+      'type': 'object'
+      'properties':
+        'id':
+          'type': 'integer'
+          'format': 'uint64'
+    'UpstreamSubscriptionsRefreshResponse':
+      'type': 'object'
+      'required':
+      - 'updated'
+      - 'errors'
+      'properties':
+        'updated':
+          'type': 'integer'
+          'description': 'Number of the subscriptions with changed contents.'
+        'errors':
+          'type': 'array'
+          'items':
+            'type': 'string'
   'securitySchemes':
     'basicAuth':
       'type': 'http'

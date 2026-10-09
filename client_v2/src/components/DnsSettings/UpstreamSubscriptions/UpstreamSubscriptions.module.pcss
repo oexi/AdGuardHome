@@ -1,0 +1,145 @@
+.container {
+    padding-top: 0;
+}
+
+.breadcrumbs {
+    padding: 0 16px;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.desc {
+    width: 100%;
+    max-width: 640px;
+    padding: 8px 16px 16px;
+    font-size: var(--fs-text-t2);
+    line-height: var(--lh-t2-normal);
+    color: var(--default-main-text);
+
+    & p {
+        margin-bottom: 8px;
+    }
+
+    & p:last-child {
+        margin-bottom: 0;
+    }
+}
+
+.switchRow {
+    max-width: 640px;
+}
+
+.button {
+    width: fit-content;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    font-size: 16px;
+    color: var(--default-main-text);
+    border-radius: 8px;
+    transition: var(--t2) background-color;
+    border: 0;
+    background: none;
+    cursor: pointer;
+
+    &:hover,
+    &:focus {
+        background: var(--hovered-secondary-button);
+    }
+
+    &:active {
+        background: var(--pressed-secondary-button);
+    }
+
+    &:disabled {
+        background: var(--disabled-secondary-button);
+        color: var(--disabled-secondary-button-stroke);
+        cursor: default;
+    }
+
+    &_checkUpdates {
+        margin-left: auto;
+    }
+}
+
+.labelDesktop {
+    display: none;
+
+    @media (min-width: 768px) {
+        display: inline;
+    }
+}
+
+.group {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 16px;
+
+    &.tableGroup {
+        padding-top: 16px;
+        flex: 1 0 auto;
+    }
+
+    &.buttonGroup {
+        align-items: flex-start;
+    }
+}
+
+.headerCell {
+    @media (min-width: 768px) {
+        width: 100%;
+        min-height: 42px;
+        padding: 0 12px;
+    }
+}
+
+.nameCellValue {
+    justify-content: space-between;
+    align-items: center;
+    flex: 1;
+    white-space: normal;
+
+    @media (min-width: 768px) {
+        flex-direction: row-reverse;
+        justify-content: flex-start;
+        gap: 8px;
+        flex: initial;
+        white-space: nowrap;
+    }
+}
+
+.muted {
+    color: var(--default-description-text);
+}
+
+.error {
+    color: var(--default-error-link);
+    white-space: normal;
+    word-break: break-word;
+}
+
+.emptyTableContent {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.emptyTableIcon {
+    width: 64px;
+    height: 64px;
+}
+
+.emptyTableDesc {
+    color: var(--default-description-text);
+}
+
+.code {
+    font-family: monospace;
+    word-break: break-all;
+}

@@ -36,6 +36,7 @@ import (
 	"github.com/AdguardTeam/AdGuardHome/internal/querylog"
 	"github.com/AdguardTeam/AdGuardHome/internal/stats"
 	"github.com/AdguardTeam/AdGuardHome/internal/updater"
+	"github.com/AdguardTeam/AdGuardHome/internal/upstreamsub"
 	"github.com/AdguardTeam/AdGuardHome/internal/version"
 	"github.com/AdguardTeam/dnsproxy/upstream"
 	"github.com/AdguardTeam/golibs/errors"
@@ -62,6 +63,9 @@ type homeContext struct {
 	dhcpServer dhcpd.Interface    // DHCP module
 
 	filters *filtering.DNSFilter // DNS filtering module
+
+	// upstreamSubs manages the subscriptions to upstream lists.
+	upstreamSubs *upstreamsub.Manager
 
 	controlLock sync.Mutex
 }

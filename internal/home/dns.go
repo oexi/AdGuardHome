@@ -21,6 +21,7 @@ import (
 	"github.com/AdguardTeam/AdGuardHome/internal/filtering"
 	"github.com/AdguardTeam/AdGuardHome/internal/querylog"
 	"github.com/AdguardTeam/AdGuardHome/internal/stats"
+	"github.com/AdguardTeam/AdGuardHome/internal/upstreamsub"
 	"github.com/AdguardTeam/dnscrypt"
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/log"
@@ -109,6 +110,11 @@ func initDNS(
 		return err
 	}
 
+	err = initUpstreamSubs(ctx, baseLogger, tlsMgr, confModifier, httpReg)
+	if err != nil {
+		return fmt.Errorf("init upstream subscriptions: %w", err)
+	}
+
 	err = initDNSServer(
 		ctx,
 		dnsforward.DNSCreateParams{
@@ -136,6 +142,54 @@ func initDNS(
 	}
 
 	return nil
+}
+
+// initUpstreamSubs initializes the [homeContext.upstreamSubs], unless it's
+// already initialized.  It must not be called unless [config] and
+// [globalContext] are initialized.  All arguments must not be nil.
+func initUpstreamSubs(
+	ctx context.Context,
+	baseLogger *slog.Logger,
+	tlsMgr *tlsManager,
+	confModifier agh.ConfigModifier,
+	httpReg aghhttp.Registrar,
+) (err error) {
+	if globalContext.upstreamSubs != nil {
+		return nil
+	}
+
+	l := baseLogger.With(slogutil.KeyPrefix, "upstream_subscriptions")
+	globalContext.upstreamSubs, err = upstreamsub.New(ctx, &upstreamsub.ManagerConfig{
+		Logger:       l,
+		Config:       config.UpstreamSubscriptions,
+		HTTPClient:   httpClient(tlsMgr),
+		ConfModifier: confModifier,
+		HTTPReg:      httpReg,
+		OnChange: func(ctx context.Context) {
+			reconfigureForUpstreamSubs(ctx, l)
+		},
+		// The filtering data directory is set to the data directory within
+		// the working one by [setupDNSFilteringConf].
+		DataDir: config.Filtering.DataDir,
+	})
+
+	return err
+}
+
+// reconfigureForUpstreamSubs restarts the DNS server, if it's running, to
+// apply the changed upstreams from the subscriptions.  l must not be nil.
+//
+// NOTE:  Don't lock [homeContext.controlLock] here, since it's already locked
+// when called from the HTTP API handlers.
+func reconfigureForUpstreamSubs(ctx context.Context, l *slog.Logger) {
+	if !isRunning() {
+		return
+	}
+
+	err := globalContext.dnsServer.Reconfigure(ctx, nil)
+	if err != nil {
+		l.ErrorContext(ctx, "reconfiguring dns server", slogutil.KeyError, err)
+	}
 }
 
 // initDNSServer initializes the [context.dnsServer].  To only use the internal
@@ -176,6 +230,12 @@ func initDNSServer(
 	)
 	if err != nil {
 		return fmt.Errorf("creating new dns server config: %w", err)
+	}
+
+	// Avoid setting a typed nil, since the subscriptions aren't initialized
+	// when called from [cmdlineUpdate].
+	if subs := globalContext.upstreamSubs; subs != nil {
+		dnsConf.UpstreamsExtender = subs
 	}
 
 	// Try to prepare the server with disabled private RDNS resolution if it
@@ -472,6 +532,10 @@ func startDNSServer() (err error) {
 	globalContext.filters.Start()
 	globalContext.stats.Start()
 
+	if globalContext.upstreamSubs != nil {
+		globalContext.upstreamSubs.Start()
+	}
+
 	err = globalContext.queryLog.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("starting query log: %w", err)
@@ -509,6 +573,10 @@ func closeDNSServer(ctx context.Context) {
 
 	if globalContext.filters != nil {
 		globalContext.filters.Close()
+	}
+
+	if globalContext.upstreamSubs != nil {
+		globalContext.upstreamSubs.Close()
 	}
 
 	if globalContext.stats != nil {

@@ -24,6 +24,7 @@ import (
 	"github.com/AdguardTeam/AdGuardHome/internal/querylog"
 	"github.com/AdguardTeam/AdGuardHome/internal/schedule"
 	"github.com/AdguardTeam/AdGuardHome/internal/stats"
+	"github.com/AdguardTeam/AdGuardHome/internal/upstreamsub"
 	"github.com/AdguardTeam/dnsproxy/fastip"
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
@@ -153,6 +154,10 @@ type configuration struct {
 
 	DHCP      *dhcpd.ServerConfig `yaml:"dhcp"`
 	Filtering *filtering.Config   `yaml:"filtering"`
+
+	// UpstreamSubscriptions is the configuration of the subscriptions to
+	// remote lists of upstream DNS servers.
+	UpstreamSubscriptions *upstreamsub.Config `yaml:"upstream_subscriptions"`
 
 	// Clients contains the YAML representations of the persistent clients.
 	// This field is only used for reading and writing persistent client data.
@@ -597,6 +602,11 @@ var config = &configuration{
 		ParentalBlockHost:     defaultParentalBlockHost,
 		SafeBrowsingBlockHost: defaultSafeBrowsingBlockHost,
 	},
+	UpstreamSubscriptions: &upstreamsub.Config{
+		Subscriptions:       []*upstreamsub.Subscription{},
+		UpdateIntervalHours: upstreamsub.DefaultUpdateIntervalHours,
+		Enabled:             true,
+	},
 	DHCP: &dhcpd.ServerConfig{
 		LocalDomainName: "lan",
 		Conf4: dhcpd.V4ServerConf{
@@ -938,6 +948,10 @@ func (c *configuration) write(
 		config.Clients.Sources.WHOIS = addrProcConf.UseWHOIS
 		dns.UsePrivateRDNS = addrProcConf.UsePrivateRDNS
 		dns.UpstreamTimeout = timeutil.Duration(s.UpstreamTimeout())
+	}
+
+	if globalContext.upstreamSubs != nil {
+		globalContext.upstreamSubs.WriteDiskConfig(config.UpstreamSubscriptions)
 	}
 
 	if globalContext.dhcpServer != nil {

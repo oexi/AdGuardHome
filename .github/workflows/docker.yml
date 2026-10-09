@@ -1,0 +1,117 @@
+'name': 'docker'
+# Builds the multi-platform Docker image of the current release with the
+# changes of this fork and publishes it to the GitHub Container Registry.
+'permissions': {}
+'env':
+  'GO_VERSION': '1.26.6'
+  'NODE_VERSION': '24'
+'on':
+  'push':
+    'branches':
+      - 'upstream-subscriptions'
+    'tags':
+      - 'v*'
+  'pull_request':
+    'branches':
+      - 'upstream-subscriptions'
+  'workflow_dispatch':
+'concurrency':
+  'group': 'docker-${{ github.ref }}'
+  'cancel-in-progress': true
+'jobs':
+  'docker':
+    'runs-on': 'ubuntu-latest'
+    'permissions':
+      'contents': 'read'
+      'packages': 'write'
+    'steps':
+      - 'name': 'Checkout'
+        'uses': 'actions/checkout@v4'
+        'with':
+          'fetch-depth': 0
+          'persist-credentials': false
+      - 'name': 'Set up Node'
+        'uses': 'actions/setup-node@v4'
+        'with':
+          'node-version': '${{ env.NODE_VERSION }}'
+          'cache': 'npm'
+          'cache-dependency-path': 'client_v2/package-lock.json'
+      - 'name': 'Set up Go'
+        'uses': 'actions/setup-go@v5'
+        'with':
+          'go-version': '${{ env.GO_VERSION }}'
+          'cache-dependency-path': 'go.sum'
+      - 'name': 'Build frontend'
+        'run': |
+          npm --prefix client_v2 ci --no-audit --no-fund
+          npm --prefix client_v2 run build-prod
+      - 'name': 'Test'
+        'run': 'go test ./internal/upstreamsub/... ./internal/dnsforward/... ./internal/home/...'
+      - 'name': 'Determine version'
+        'id': 'version'
+        # The version is the latest release tag reachable from the commit,
+        # e.g. v0.107.79.
+        'run': |
+          version="$(git describe --tags --abbrev=0 --match 'v*' --exclude '*-*')"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/adguardhome" >> "$GITHUB_OUTPUT"
+      - 'name': 'Build binaries'
+        'env':
+          'CHANNEL': 'release'
+          'VERSION': '${{ steps.version.outputs.version }}'
+          'GOOS': 'linux'
+        # The file names must match the ones expected by
+        # docker/build.Dockerfile.
+        'run': |
+          mkdir -p dist/docker
+          for target in 386: amd64: arm:6 arm:7 arm64: ppc64le:; do
+            arch="${target%%:*}"
+            arm="${target#*:}"
+            variant=''
+            if [ "$arm" != '' ]; then
+              variant="v${arm}"
+            fi
+            GOARCH="$arch" GOARM="$arm" \
+              OUT="dist/docker/AdGuardHome_linux_${arch}_${variant}" \
+              sh ./scripts/make/go-build.sh
+          done
+          ls -l dist/docker
+      - 'name': 'Set up QEMU'
+        'uses': 'docker/setup-qemu-action@v3'
+      - 'name': 'Set up Docker Buildx'
+        'uses': 'docker/setup-buildx-action@v3'
+      - 'name': 'Log in to GHCR'
+        'if': "github.event_name != 'pull_request'"
+        'uses': 'docker/login-action@v3'
+        'with':
+          'registry': 'ghcr.io'
+          'username': '${{ github.actor }}'
+          'password': '${{ secrets.GITHUB_TOKEN }}'
+      - 'name': 'Docker metadata'
+        'id': 'meta'
+        'uses': 'docker/metadata-action@v5'
+        'with':
+          'images': '${{ steps.version.outputs.image }}'
+          'tags': |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+            type=sha,format=short
+          'labels': |
+            org.opencontainers.image.title=AdGuard Home
+            org.opencontainers.image.description=AdGuard Home with upstream DNS subscriptions
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+      - 'name': 'Build and push'
+        'uses': 'docker/build-push-action@v6'
+        'with':
+          'context': '.'
+          'file': './docker/build.Dockerfile'
+          'platforms': 'linux/386,linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64,linux/ppc64le'
+          'build-args': |
+            DIST_DIR=dist
+            VERSION=${{ steps.version.outputs.version }}
+            VCS_REF=${{ github.sha }}
+          'tags': '${{ steps.meta.outputs.tags }}'
+          'labels': '${{ steps.meta.outputs.labels }}'
+          'push': "${{ github.event_name != 'pull_request' }}"
+          'cache-from': 'type=gha'
+          'cache-to': 'type=gha,mode=max'
