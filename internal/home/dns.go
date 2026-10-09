@@ -158,6 +158,15 @@ func initUpstreamSubs(
 		return nil
 	}
 
+	if config.UpstreamSubscriptions == nil {
+		// The section may be explicitly set to null in the configuration
+		// file.
+		config.UpstreamSubscriptions = &upstreamsub.Config{
+			UpdateIntervalHours: upstreamsub.DefaultUpdateIntervalHours,
+			Enabled:             true,
+		}
+	}
+
 	l := baseLogger.With(slogutil.KeyPrefix, "upstream_subscriptions")
 	globalContext.upstreamSubs, err = upstreamsub.New(ctx, &upstreamsub.ManagerConfig{
 		Logger:       l,
