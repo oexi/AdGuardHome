@@ -209,54 +209,86 @@ func (m *Manager) ExtendUpstreams(ctx context.Context, ups []string) (extended [
 		return ups
 	}
 
-	seenDomains := container.NewMapSet[string]()
-	seenGeneral := container.NewMapSet[string]()
-	for _, l := range ups {
-		domainsStr, _, ok := strings.Cut(strings.TrimPrefix(l, "[/"), "/]")
-		if ok && strings.HasPrefix(l, "[/") {
-			for d := range strings.SplitSeq(domainsStr, "/") {
-				seenDomains.Add(strings.ToLower(strings.TrimSuffix(d, ".")))
-			}
-		} else {
-			seenGeneral.Add(l)
-		}
-	}
-
+	seen := newSeenSet(ups)
 	extended = slices.Clip(ups)
 	added := 0
 	for _, sub := range m.conf.Subscriptions {
 		st := m.states[sub.ID]
-		if !sub.Enabled || st == nil || st.res == nil {
-			continue
-		}
-
-		for _, g := range st.res.groups {
-			domains := make([]string, 0, len(g.domains))
-			for _, d := range g.domains {
-				if !seenDomains.Has(d) {
-					seenDomains.Add(d)
-					domains = append(domains, d)
-				}
-			}
-
-			if len(domains) > 0 {
-				extended = append(extended, "[/"+strings.Join(domains, "/")+"/]"+g.upstreams)
-				added += len(domains)
-			}
-		}
-
-		for _, u := range st.res.general {
-			if !seenGeneral.Has(u) {
-				seenGeneral.Add(u)
-				extended = append(extended, u)
-				added++
-			}
+		if sub.Enabled && st != nil && st.res != nil {
+			extended, added = seen.appendNew(extended, added, st.res)
 		}
 	}
 
 	m.logger.DebugContext(ctx, "extended upstreams", "added_rules", added)
 
 	return extended
+}
+
+// seenSet contains the domains and the general upstreams that are already
+// specified.
+type seenSet struct {
+	domains *container.MapSet[string]
+	general *container.MapSet[string]
+}
+
+// newSeenSet returns a new seenSet containing the domains and the general
+// upstreams from the upstream configuration lines ups.
+func newSeenSet(ups []string) (seen *seenSet) {
+	seen = &seenSet{
+		domains: container.NewMapSet[string](),
+		general: container.NewMapSet[string](),
+	}
+
+	for _, l := range ups {
+		rest, isDomainSpecific := strings.CutPrefix(l, "[/")
+		domainsStr, _, ok := strings.Cut(rest, "/]")
+		if !isDomainSpecific || !ok {
+			seen.general.Add(l)
+
+			continue
+		}
+
+		for d := range strings.SplitSeq(domainsStr, "/") {
+			seen.domains.Add(strings.ToLower(strings.TrimSuffix(d, ".")))
+		}
+	}
+
+	return seen
+}
+
+// appendNew appends the rules from res that aren't in seen to ups, marks them
+// as seen, and returns the extended ups along with the number of the added
+// rules increased by the number of the newly added ones.
+func (seen *seenSet) appendNew(
+	ups []string,
+	added int,
+	res *parseResult,
+) (extended []string, newAdded int) {
+	extended, newAdded = ups, added
+	for _, g := range res.groups {
+		domains := make([]string, 0, len(g.domains))
+		for _, d := range g.domains {
+			if !seen.domains.Has(d) {
+				seen.domains.Add(d)
+				domains = append(domains, d)
+			}
+		}
+
+		if len(domains) > 0 {
+			extended = append(extended, "[/"+strings.Join(domains, "/")+"/]"+g.upstreams)
+			newAdded += len(domains)
+		}
+	}
+
+	for _, u := range res.general {
+		if !seen.general.Has(u) {
+			seen.general.Add(u)
+			extended = append(extended, u)
+			newAdded++
+		}
+	}
+
+	return extended, newAdded
 }
 
 // Start starts the periodic updates of the subscriptions.
@@ -322,27 +354,7 @@ func (m *Manager) refresh(
 	m.updateMu.Lock()
 	defer m.updateMu.Unlock()
 
-	var toUpdate []*Subscription
-	func() {
-		m.mu.RLock()
-		defer m.mu.RUnlock()
-
-		if !m.conf.Enabled && !force {
-			return
-		}
-
-		now := time.Now()
-		for _, sub := range m.conf.Subscriptions {
-			if len(ids) > 0 && !slices.Contains(ids, sub.ID) {
-				continue
-			}
-
-			if sub.Enabled && (force || m.isOutdated(sub, now)) {
-				toUpdate = append(toUpdate, sub.clone())
-			}
-		}
-	}()
-
+	toUpdate := m.subsToUpdate(force, ids)
 	if len(toUpdate) == 0 {
 		return 0, nil
 	}
@@ -358,9 +370,7 @@ func (m *Manager) refresh(
 		}
 
 		succeeded++
-		if changed {
-			updated++
-		}
+		updated += boolToInt(changed)
 	}
 
 	if succeeded > 0 {
@@ -373,6 +383,41 @@ func (m *Manager) refresh(
 	}
 
 	return updated, errors.Join(errs...)
+}
+
+// boolToInt returns 1 if b is true and 0 otherwise.
+func boolToInt(b bool) (i int) {
+	if b {
+		return 1
+	}
+
+	return 0
+}
+
+// subsToUpdate returns the copies of the enabled subscriptions to update.  If
+// force is false, only the outdated ones are returned, and only if the
+// subscriptions are enabled.  If ids is not empty, only the subscriptions with
+// these identifiers are considered.
+func (m *Manager) subsToUpdate(force bool, ids []uint64) (subs []*Subscription) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.conf.Enabled && !force {
+		return nil
+	}
+
+	now := time.Now()
+	for _, sub := range m.conf.Subscriptions {
+		if len(ids) > 0 && !slices.Contains(ids, sub.ID) {
+			continue
+		}
+
+		if sub.Enabled && (force || m.isOutdated(sub, now)) {
+			subs = append(subs, sub.clone())
+		}
+	}
+
+	return subs
 }
 
 // isEnabled returns true if the subscriptions are enabled.
@@ -405,12 +450,7 @@ func (m *Manager) update(ctx context.Context, sub *Subscription) (changed bool, 
 	}
 
 	sum := sha256.Sum256(data)
-
-	m.mu.RLock()
-	prev := m.states[sub.ID]
-	m.mu.RUnlock()
-
-	changed = prev == nil || prev.res == nil || prev.checksum != sum
+	changed = m.isChanged(sub.ID, sum)
 	if changed {
 		err = m.save(sub.ID, data)
 		if err != nil {
@@ -420,20 +460,8 @@ func (m *Manager) update(ctx context.Context, sub *Subscription) (changed bool, 
 		}
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// The subscription could be removed or changed during the download.
-	cur := m.find(sub.ID)
-	if cur == nil || cur.URL != sub.URL || !slices.Equal(cur.Upstreams, sub.Upstreams) {
+	if !m.storeUpdate(sub, res, sum, changed) {
 		return false, nil
-	}
-
-	cur.LastUpdated = time.Now()
-	if changed {
-		m.states[sub.ID] = &subState{res: res, checksum: sum}
-	} else {
-		prev.lastErr = nil
 	}
 
 	m.logger.InfoContext(
@@ -446,6 +474,44 @@ func (m *Manager) update(ctx context.Context, sub *Subscription) (changed bool, 
 	)
 
 	return changed, nil
+}
+
+// isChanged returns true if the contents of the subscription with the given id
+// have never been loaded or have a checksum other than sum.
+func (m *Manager) isChanged(id uint64, sum [sha256.Size]byte) (ok bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	prev := m.states[id]
+
+	return prev == nil || prev.res == nil || prev.checksum != sum
+}
+
+// storeUpdate saves the result of a successful update of sub, which must be a
+// copy of the configured subscription.  ok is false if the subscription has
+// been removed or changed during the update, so that the result is stale.
+func (m *Manager) storeUpdate(
+	sub *Subscription,
+	res *parseResult,
+	sum [sha256.Size]byte,
+	changed bool,
+) (ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cur := m.find(sub.ID)
+	if cur == nil || cur.URL != sub.URL || !slices.Equal(cur.Upstreams, sub.Upstreams) {
+		return false
+	}
+
+	cur.LastUpdated = time.Now()
+	if changed {
+		m.states[sub.ID] = &subState{res: res, checksum: sum}
+	} else if prev := m.states[sub.ID]; prev != nil {
+		prev.lastErr = nil
+	}
+
+	return true
 }
 
 // setError saves err as the last error of the subscription with the given id.

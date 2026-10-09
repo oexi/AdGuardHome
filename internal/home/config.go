@@ -885,6 +885,14 @@ func readConfigFile(
 	return os.ReadFile(confPath)
 }
 
+// writeUpstreamSubsConfig writes the configuration of the upstream
+// subscriptions into c, if they're initialized.
+func writeUpstreamSubsConfig(c *configuration) {
+	if subs := globalContext.upstreamSubs; subs != nil {
+		subs.WriteDiskConfig(c.UpstreamSubscriptions)
+	}
+}
+
 // write saves configuration to the YAML file and also saves the user filter
 // contents to a file.  l must not be nil.
 func (c *configuration) write(
@@ -950,9 +958,7 @@ func (c *configuration) write(
 		dns.UpstreamTimeout = timeutil.Duration(s.UpstreamTimeout())
 	}
 
-	if globalContext.upstreamSubs != nil {
-		globalContext.upstreamSubs.WriteDiskConfig(config.UpstreamSubscriptions)
-	}
+	writeUpstreamSubsConfig(c)
 
 	if globalContext.dhcpServer != nil {
 		globalContext.dhcpServer.WriteDiskConfig(config.DHCP)

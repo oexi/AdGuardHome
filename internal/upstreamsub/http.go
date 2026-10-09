@@ -337,13 +337,7 @@ func (m *Manager) set(
 	d *subscriptionDataJSON,
 	ups []string,
 ) (code int, err error) {
-	m.mu.RLock()
-	cur := m.find(id)
-	if cur != nil {
-		cur = cur.clone()
-	}
-	m.mu.RUnlock()
-
+	cur := m.findClone(id)
 	if cur == nil {
 		return http.StatusBadRequest, fmt.Errorf("subscription with id %d not found", id)
 	}
@@ -352,52 +346,100 @@ func (m *Manager) set(
 		return http.StatusBadRequest, fmt.Errorf("url %q already exists", d.URL)
 	}
 
+	f, err := m.fetchForSet(ctx, cur, d.URL, ups)
+	if err != nil {
+		return http.StatusBadRequest, err
+	}
+
 	enabled := cur.Enabled
 	if d.Enabled != nil {
 		enabled = *d.Enabled
 	}
 
-	var f *fetched
-	switch {
-	case d.URL != cur.URL:
-		f, err = m.fetch(ctx, d.URL, ups)
-		if err != nil {
-			return http.StatusBadRequest, err
-		}
-	case !slices.Equal(ups, cur.Upstreams):
-		f, err = m.reparse(ctx, id, d.URL, ups)
-		if err != nil {
-			return http.StatusBadRequest, err
-		}
-	default:
-		// Only the name or the enabled state changed.
+	upd := &Subscription{
+		Name:      d.Name,
+		URL:       d.URL,
+		Upstreams: ups,
+		ID:        id,
+		Enabled:   enabled,
 	}
 
-	m.mu.Lock()
-	sub := m.find(id)
-	if sub != nil {
-		if f != nil {
-			err = m.save(id, f.data)
-		}
-
-		if err == nil {
-			upstreamsChanged := f != nil || sub.Enabled != enabled
-			sub.Name, sub.URL, sub.Upstreams, sub.Enabled = d.Name, d.URL, ups, enabled
-			if f != nil {
-				sub.LastUpdated = time.Now()
-				m.states[id] = &subState{res: f.res, checksum: sha256.Sum256(f.data)}
-			}
-
-			defer m.afterSet(ctx, upstreamsChanged)
-		}
-	}
-	m.mu.Unlock()
-
+	found, upstreamsChanged, err := m.applySet(upd, f)
 	if err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("saving: %w", err)
 	}
 
+	if found {
+		m.afterSet(ctx, upstreamsChanged)
+	}
+
 	return http.StatusOK, nil
+}
+
+// findClone returns a copy of the subscription with the given id or nil if
+// there is no such subscription.
+func (m *Manager) findClone(id uint64) (sub *Subscription) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	sub = m.find(id)
+	if sub != nil {
+		sub = sub.clone()
+	}
+
+	return sub
+}
+
+// fetchForSet returns the new contents of the subscription cur, which is
+// changed to have URL u and the upstreams override.  f is nil if the contents
+// don't need to be changed.
+func (m *Manager) fetchForSet(
+	ctx context.Context,
+	cur *Subscription,
+	u string,
+	override []string,
+) (f *fetched, err error) {
+	switch {
+	case u != cur.URL:
+		return m.fetch(ctx, u, override)
+	case !slices.Equal(override, cur.Upstreams):
+		return m.reparse(ctx, cur.ID, u, override)
+	default:
+		// Only the name or the enabled state changed.
+		return nil, nil
+	}
+}
+
+// applySet saves the user-editable fields of upd into the configured
+// subscription with the same identifier along with the new contents f, if
+// any.  found is false if there is no such subscription anymore.
+// upstreamsChanged is true if the resulting upstreams may have changed.
+func (m *Manager) applySet(
+	upd *Subscription,
+	f *fetched,
+) (found, upstreamsChanged bool, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sub := m.find(upd.ID)
+	if sub == nil {
+		return false, false, nil
+	}
+
+	if f != nil {
+		err = m.save(upd.ID, f.data)
+		if err != nil {
+			return true, false, err
+		}
+
+		sub.LastUpdated = time.Now()
+		m.states[upd.ID] = &subState{res: f.res, checksum: sha256.Sum256(f.data)}
+	}
+
+	upstreamsChanged = f != nil || sub.Enabled != upd.Enabled
+	sub.Name, sub.URL, sub.Upstreams, sub.Enabled = upd.Name, upd.URL, upd.Upstreams, upd.Enabled
+
+	return true, upstreamsChanged, nil
 }
 
 // afterSet persists the configuration and applies the changed upstreams, if

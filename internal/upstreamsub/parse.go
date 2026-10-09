@@ -68,79 +68,93 @@ const (
 //
 // Empty lines and lines starting with "#", "!", or "//" are ignored.
 func parse(data []byte, override []string) (res *parseResult) {
-	res = &parseResult{}
-
-	overrideUps := strings.Join(override, " ")
-	groupIdx := map[string]*group{}
-	seen := container.NewMapSet[string]()
-	validUps := map[string]bool{}
+	p := &parser{
+		res:      &parseResult{},
+		override: strings.Join(override, " "),
+		groupIdx: map[string]*group{},
+		seen:     container.NewMapSet[string](),
+		validUps: map[string]bool{},
+	}
 
 	s := bufio.NewScanner(bytes.NewReader(data))
 	s.Buffer(make([]byte, 0, 64*1024), maxLineLen)
 	for s.Scan() {
-		kind, ups, domains := parseLine(s.Text(), overrideUps != "")
-		switch kind {
-		case lineKindSkip:
-			continue
-		case lineKindInvalid:
-			res.invalidCount++
-
-			continue
-		case lineKindGeneral:
-			if overrideUps != "" {
-				// General upstreams make no sense for domain lists.
-				continue
-			}
-
-			if !isValidUpstreams(validUps, ups) {
-				res.invalidCount++
-
-				continue
-			}
-
-			if !slices.Contains(res.general, ups) {
-				res.general = append(res.general, ups)
-				res.rulesCount++
-			}
-
-			continue
-		default:
-			// Go on.
-		}
-
-		if overrideUps != "" && ups != "#" {
-			ups = overrideUps
-		}
-
-		if !isValidUpstreams(validUps, ups) {
-			res.invalidCount++
-
-			continue
-		}
-
-		res.addDomains(groupIdx, seen, ups, domains)
+		p.addLine(s.Text())
 	}
 
 	if s.Err() != nil {
 		// The only possible error is a too long line, so count it as invalid
 		// and use what has been parsed so far.
-		res.invalidCount++
+		p.res.invalidCount++
 	}
 
-	return res
+	return p.res
 }
 
 // maxLineLen is the maximum length of a single line in the subscription.
 const maxLineLen = 16 * 1024 * 1024
 
+// parser contains the state of parsing a subscription.
+type parser struct {
+	// res is the result being built.
+	res *parseResult
+
+	// groupIdx maps the upstreams to the groups of res.
+	groupIdx map[string]*group
+
+	// seen are the domains already added to res.
+	seen *container.MapSet[string]
+
+	// validUps caches the validation results of upstreams.
+	validUps map[string]bool
+
+	// override is the space-separated upstreams override, if any.
+	override string
+}
+
+// addLine adds the rules from a single line to the result.
+func (p *parser) addLine(line string) {
+	kind, ups, domains := parseLine(line, p.override != "")
+	switch kind {
+	case lineKindSkip:
+		// Go on.
+	case lineKindInvalid:
+		p.res.invalidCount++
+	case lineKindGeneral:
+		p.addGeneral(ups)
+	default:
+		if p.override != "" && ups != "#" {
+			ups = p.override
+		}
+
+		if isValidUpstreams(p.validUps, ups) {
+			p.addDomains(ups, domains)
+		} else {
+			p.res.invalidCount++
+		}
+	}
+}
+
+// addGeneral adds the general upstream ups to the result, unless there is an
+// override, since general upstreams make no sense for domain lists.
+func (p *parser) addGeneral(ups string) {
+	switch {
+	case p.override != "":
+		// Ignore.
+	case !isValidUpstreams(p.validUps, ups):
+		p.res.invalidCount++
+	case !slices.Contains(p.res.general, ups):
+		p.res.general = append(p.res.general, ups)
+		p.res.rulesCount++
+	default:
+		// Duplicate.
+	}
+}
+
 // addDomains adds valid domains that haven't been seen before to the group of
 // ups.
-func (res *parseResult) addDomains(
-	groupIdx map[string]*group,
-	seen *container.MapSet[string],
-	ups string,
-	domains []string,
-) {
+func (p *parser) addDomains(ups string, domains []string) {
+	res := p.res
 	for _, d := range domains {
 		d = strings.ToLower(strings.TrimSuffix(d, "."))
 		if d == "" || netutil.ValidateDomainName(strings.TrimPrefix(d, "*.")) != nil {
@@ -149,16 +163,16 @@ func (res *parseResult) addDomains(
 			continue
 		}
 
-		if seen.Has(d) {
+		if p.seen.Has(d) {
 			continue
 		}
 
-		seen.Add(d)
+		p.seen.Add(d)
 
-		g := groupIdx[ups]
+		g := p.groupIdx[ups]
 		if g == nil {
 			g = &group{upstreams: ups}
-			groupIdx[ups] = g
+			p.groupIdx[ups] = g
 			res.groups = append(res.groups, g)
 		}
 
@@ -315,7 +329,8 @@ func isValidUpstreams(cache map[string]bool, ups string) (ok bool) {
 		return true
 	}
 
-	if ok, cached := cache[ups]; cached {
+	ok, cached := cache[ups]
+	if cached {
 		return ok
 	}
 
