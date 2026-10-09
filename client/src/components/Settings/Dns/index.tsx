@@ -5,6 +5,8 @@ import { useDispatch, useSelector } from 'react-redux';
 
 import Upstream from './Upstream';
 
+import UpstreamSubscriptions from './UpstreamSubscriptions';
+
 import Access from './Access';
 
 import Config from './Config';
@@ -41,6 +43,8 @@ const Dns = () => {
             ) : (
                 <>
                     <Upstream />
+
+                    <UpstreamSubscriptions />
 
                     <Config />
 
