@@ -2,7 +2,6 @@ import { Show, onMount } from 'solid-js';
 
 import { dnsConfigState, getDnsConfig } from 'panel/stores/dnsConfig';
 import { accessState, getAccessList } from 'panel/stores/access';
-import { getUpstreamSubscriptions } from 'panel/stores/upstreamSubscriptions';
 import intl from 'panel/common/intl';
 import cn from 'clsx';
 
@@ -17,7 +16,6 @@ export const DnsSettings = () => {
     onMount(() => {
         getAccessList();
         getDnsConfig();
-        getUpstreamSubscriptions();
     });
 
     return (

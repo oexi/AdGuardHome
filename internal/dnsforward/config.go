@@ -485,7 +485,10 @@ func parseBogusNXDOMAIN(confBogusNXDOMAIN []string) (subnets []netip.Prefix, err
 // initDefaultSettings initializes default settings if nothing
 // is configured
 func (s *Server) initDefaultSettings() {
-	if len(s.conf.UpstreamDNS) == 0 {
+	// Keep the upstreams empty if they may be provided by the extender.  The
+	// default ones are still used if there are no general upstreams at all,
+	// see [newUpstreamConfig].
+	if len(s.conf.UpstreamDNS) == 0 && s.conf.UpstreamsExtender == nil {
 		s.conf.UpstreamDNS = defaultDNS
 	}
 
